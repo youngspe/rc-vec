@@ -1,6 +1,8 @@
 use crate::base::counter::StrongWeakCounter;
 use crate::base::vec_ref::{VecMut, VecRef};
 use crate::base::{BaseRcVec, StrongType, WeakType};
+use core::cmp::Ordering;
+use core::fmt;
 use core::ops::{Deref, DerefMut};
 use core::ops::{Index, IndexMut};
 use core::slice::SliceIndex;
@@ -43,6 +45,13 @@ impl<T: Clone> RcVec<T> {
 
     pub fn remove(&mut self, index: usize) -> Option<T> {
         self.base.try_make_vec_mut().unwrap().remove(index)
+    }
+
+    pub unsafe fn copy_from_ptr_unsafe(ptr: *mut T, len: usize) -> Self {
+        let v = HeaderVec::copy_from_ptr_unsafe(Default::default(), ptr, len);
+        Self {
+            base: BaseRcVec::from_vec(v),
+        }
     }
 }
 
@@ -167,5 +176,38 @@ impl<T> core::iter::FromIterator<T> for RcVec<T> {
         Self {
             base: BaseRcVec::from_vec(it.into_iter().collect()),
         }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for RcVec<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let slice: &[T] = self;
+        fmt::Debug::fmt(slice, f)
+    }
+}
+
+impl<T: PartialEq> PartialEq for RcVec<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        let s1: &[T] = self;
+        let s2: &[T] = rhs;
+        s1 == s2
+    }
+}
+
+impl<T: Eq> Eq for RcVec<T> {}
+
+impl<T: PartialOrd> PartialOrd for RcVec<T> {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        let s1: &[T] = self;
+        let s2: &[T] = rhs;
+        s1.partial_cmp(s2)
+    }
+}
+
+impl<T: Ord> Ord for RcVec<T> {
+    fn cmp(&self, rhs: &Self) -> Ordering {
+        let s1: &[T] = self;
+        let s2: &[T] = rhs;
+        s1.cmp(s2)
     }
 }

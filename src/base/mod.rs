@@ -102,7 +102,6 @@ impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
 
     unsafe fn unsafe_vec_mut(&mut self) -> VecMut<H, T> {
         let vr = VecMut::new(&mut self.parts);
-        debug_assert!(vr.head.valid_strong());
         vr
     }
 
@@ -171,14 +170,14 @@ impl<H: Counter, V: VecType<H>, T: Clone> BaseRcVec<H, V, T> {
 
 impl<H: Counter, V: VecType<H>, T> Drop for BaseRcVec<H, V, T> {
     fn drop(&mut self) {
-        let counter = self.counter();
         unsafe {
-            V::decr(counter);
+            V::decr(self.counter());
 
-            if V::should_drop_entire_vector(counter) {
-                VecMut::drop_entire_vector(self.unsafe_vec_mut())
-            } else if V::should_drop_contents(counter) {
-                self.unsafe_vec_mut().clear_in_place()
+            if V::should_drop_contents(self.counter()) {
+                self.unsafe_vec_mut().clear_in_place();
+            }
+            if V::should_drop_entire_vector(self.counter()) {
+                VecMut::dealloc_vector(self.unsafe_vec_mut())
             }
         }
     }
