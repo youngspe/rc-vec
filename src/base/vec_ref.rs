@@ -13,6 +13,17 @@ pub struct HeaderVecParts<H, T> {
     pub cap: usize,
 }
 
+impl<H, T> HeaderVecParts<H, T> {
+    pub fn from_vec(src: HeaderVec<H, T>) -> Self {
+        let (ptr, len, cap) = src.into_raw_parts();
+        Self { ptr, len, cap }
+    }
+    pub unsafe fn into_vec(self) -> HeaderVec<H, T> {
+        let Self { ptr, len, cap } = self;
+        HeaderVec::from_raw_parts(ptr, len, cap)
+    }
+}
+
 impl<H, T> Clone for HeaderVecParts<H, T> {
     fn clone(&self) -> Self {
         Self {
@@ -39,8 +50,7 @@ impl<'a, H, T> VecRef<'a, H, T> {
     /// SAFETY: Promise that no mutable references to the vector will be created while this instance
     /// exists.
     pub unsafe fn new(src: &'a HeaderVecParts<H, T>) -> Self {
-        let HeaderVecParts { ptr, len, cap } = *src;
-        let inner = ManuallyDrop::new(HeaderVec::from_raw_parts(ptr, len, cap));
+        let inner = ManuallyDrop::new(src.into_vec());
         Self {
             inner,
             _lt: PhantomData,
@@ -64,8 +74,7 @@ impl<'a, H, T> VecMut<'a, H, T> {
     /// SAFETY: Promise that no other references to the vector will be created while this instance
     /// exists.
     pub unsafe fn new(src: &'a mut HeaderVecParts<H, T>) -> Self {
-        let HeaderVecParts { ptr, len, cap } = *src;
-        let inner = ManuallyDrop::new(HeaderVec::from_raw_parts(ptr, len, cap));
+        let inner = ManuallyDrop::new(src.into_vec());
         VecMut { src, inner }
     }
 

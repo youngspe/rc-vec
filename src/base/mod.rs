@@ -93,8 +93,7 @@ impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
 
     pub fn from_vec(mut src: HeaderVec<H, T>) -> Self {
         src.head = H::default();
-        let (ptr, len, cap) = src.into_raw_parts();
-        unsafe { Self::from_parts(HeaderVecParts { ptr, len, cap }) }
+        unsafe { Self::from_parts(HeaderVecParts::from_vec(src)) }
     }
 
     unsafe fn unsafe_vec_ref(&self) -> VecRef<H, T> {
@@ -144,11 +143,29 @@ impl<H: Counter, V: VecType<H>, T: Clone> BaseRcVec<H, V, T> {
         Some(Self::from_vec(new_vec))
     }
 
-    pub fn try_make_vec_mut(&mut self) -> Option<VecMut<H, T>> {
+    fn try_make_unique(&mut self) -> bool {
         if !V::can_get_mut(self.counter()) {
-            *self = self.try_deep_clone()?;
+            *self = match self.try_deep_clone() {
+                Some(x) => x,
+                None => return false,
+            }
+        }
+        return true;
+    }
+
+    pub fn try_make_vec_mut(&mut self) -> Option<VecMut<H, T>> {
+        if !self.try_make_unique() {
+            return None;
         }
         Some(unsafe { self.unsafe_vec_mut() })
+    }
+
+    pub fn try_into_vec(mut self) -> Result<HeaderVec<H, T>, Self> {
+        if !self.try_make_unique() {
+            return Err(self);
+        }
+
+        Ok(unsafe { self.parts.into_vec() })
     }
 }
 
