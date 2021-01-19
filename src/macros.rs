@@ -10,3 +10,12 @@ macro_rules! rc_vec {
         core::iter::repeat($val).take($len).collect::<$crate::vec::RcVec<_>>()
     };
 }
+
+#[macro_export]
+macro_rules! rc_str {
+    ($f:literal $(,$arg:expr)* $(,)?) => {{
+        let mut s = $crate::string::RcString::new();
+        core::fmt::write(&mut s, format_args!($f $(,$arg)*)).unwrap();
+        s
+    }};
+}

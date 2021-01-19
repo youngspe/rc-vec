@@ -1,3 +1,2 @@
-pub mod create;
-pub mod rc;
-pub mod drop;
+pub mod rc_vec;
+pub mod string;
