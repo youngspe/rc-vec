@@ -1,116 +1,53 @@
-pub mod counter;
 pub mod vec_ref;
 
-use core::convert::Infallible;
-use core::marker::PhantomData;
-use counter::Counter;
 use header_slice::HeaderVec;
 use vec_ref::{HeaderVecParts, VecMut, VecRef};
 
-pub struct BaseRcVec<H: Counter, V: VecType<H>, T> {
-    parts: HeaderVecParts<H, T>,
-    _v: PhantomData<V>,
+pub trait Counter: Default + Clone {}
+
+pub struct BaseRcVec<V: VecType, T> {
+    parts: HeaderVecParts<V::Counter, T>,
 }
 
-pub unsafe trait VecType<C: Counter> {
-    unsafe fn incr(counter: &C);
-    unsafe fn decr(counter: &C);
-    fn can_take(counter: &C) -> bool;
-    fn can_get_ref(counter: &C) -> bool;
-    fn can_get_mut(counter: &C) -> bool;
-    fn should_drop_entire_vector(counter: &C) -> bool;
-    fn should_drop_contents(counter: &C) -> bool;
-    fn can_create(counter: &C) -> bool;
+pub unsafe trait VecType {
+    type Counter: Counter;
+    fn incr(counter: &Self::Counter);
+    fn decr(counter: &Self::Counter);
+    fn can_take(counter: &Self::Counter) -> bool;
+    fn can_get_ref(counter: &Self::Counter) -> bool;
+    fn can_get_mut(counter: &Self::Counter) -> bool;
+    fn should_drop_entire_vector(counter: &Self::Counter) -> bool;
+    fn should_drop_contents(counter: &Self::Counter) -> bool;
+    fn can_create(counter: &Self::Counter) -> bool;
 }
 
-pub struct StrongType(Infallible);
-
-unsafe impl<C: Counter> VecType<C> for StrongType {
-    unsafe fn incr(counter: &C) {
-        counter.incr_strong();
-    }
-    unsafe fn decr(counter: &C) {
-        counter.decr_strong();
-    }
-    fn can_take(counter: &C) -> bool {
-        counter.unique_strong()
-    }
-    fn can_get_ref(counter: &C) -> bool {
-        counter.valid_strong()
-    }
-    fn can_get_mut(counter: &C) -> bool {
-        counter.unique_weak()
-    }
-    fn should_drop_entire_vector(counter: &C) -> bool {
-        !counter.valid_weak()
-    }
-    fn should_drop_contents(counter: &C) -> bool {
-        !counter.valid_strong()
-    }
-    fn can_create(counter: &C) -> bool {
-        counter.valid_strong()
-    }
-}
-
-pub struct WeakType(Infallible);
-
-unsafe impl<C: Counter> VecType<C> for WeakType {
-    unsafe fn incr(counter: &C) {
-        counter.incr_weak();
-    }
-    unsafe fn decr(counter: &C) {
-        counter.decr_weak();
-    }
-    fn can_take(_: &C) -> bool {
-        false
-    }
-    fn can_get_ref(_: &C) -> bool {
-        false
-    }
-    fn can_get_mut(_: &C) -> bool {
-        false
-    }
-    fn should_drop_entire_vector(counter: &C) -> bool {
-        !counter.valid_weak()
-    }
-    fn should_drop_contents(_: &C) -> bool {
-        false
-    }
-    fn can_create(_: &C) -> bool {
-        true
-    }
-}
-
-impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
-    unsafe fn from_parts(parts: HeaderVecParts<H, T>) -> Self {
-        let this = Self {
-            parts,
-            _v: PhantomData,
-        };
+impl<V: VecType, T> BaseRcVec<V, T> {
+    unsafe fn from_parts(parts: HeaderVecParts<V::Counter, T>) -> Self {
+        let this = Self { parts };
         V::incr(this.counter());
         this
     }
 
-    pub fn from_vec(mut src: HeaderVec<H, T>) -> Self {
-        src.head = H::default();
+    pub fn from_vec(mut src: HeaderVec<V::Counter, T>) -> Self {
+        src.head = Default::default();
         unsafe { Self::from_parts(HeaderVecParts::from_vec(src)) }
     }
 
-    unsafe fn unsafe_vec_ref(&self) -> VecRef<H, T> {
+    unsafe fn unsafe_vec_ref(&self) -> VecRef<V::Counter, T> {
         VecRef::new(&self.parts)
     }
 
-    unsafe fn unsafe_vec_mut(&mut self) -> VecMut<H, T> {
+    unsafe fn unsafe_vec_mut(&mut self) -> VecMut<V::Counter, T> {
         let vr = VecMut::new(&mut self.parts);
         vr
     }
 
-    fn counter(&self) -> &H {
+    fn counter(&self) -> &V::Counter {
         // SAFETY: at least the counter must exist if this instance exists
         unsafe { VecRef::get_head(&self.unsafe_vec_ref()) }
     }
 
-    pub fn try_vec_ref(&self) -> Option<VecRef<H, T>> {
+    pub fn try_vec_ref(&self) -> Option<VecRef<V::Counter, T>> {
         let vr = unsafe { self.unsafe_vec_ref() };
         if V::can_get_ref(&vr.head) {
             Some(vr)
@@ -119,7 +56,7 @@ impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
         }
     }
 
-    pub fn _try_vec_mut(&mut self) -> Option<VecMut<H, T>> {
+    pub fn _try_vec_mut(&mut self) -> Option<VecMut<V::Counter, T>> {
         if V::can_get_mut(self.counter()) {
             Some(unsafe { self.unsafe_vec_mut() })
         } else {
@@ -127,7 +64,7 @@ impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
         }
     }
 
-    pub fn try_convert<V2: VecType<H>>(&self) -> Option<BaseRcVec<H, V2, T>> {
+    pub fn try_convert<V2: VecType<Counter = V::Counter>>(&self) -> Option<BaseRcVec<V2, T>> {
         if V2::can_create(self.counter()) {
             Some(unsafe { BaseRcVec::from_parts(self.parts) })
         } else {
@@ -136,7 +73,7 @@ impl<H: Counter, V: VecType<H>, T> BaseRcVec<H, V, T> {
     }
 }
 
-impl<H: Counter, V: VecType<H>, T: Clone> BaseRcVec<H, V, T> {
+impl<V: VecType, T: Clone> BaseRcVec<V, T> {
     pub fn try_deep_clone(&self) -> Option<Self> {
         let new_vec = self.try_vec_ref()?.clone();
         Some(Self::from_vec(new_vec))
@@ -152,14 +89,14 @@ impl<H: Counter, V: VecType<H>, T: Clone> BaseRcVec<H, V, T> {
         return true;
     }
 
-    pub fn try_make_vec_mut(&mut self) -> Option<VecMut<H, T>> {
+    pub fn try_make_vec_mut(&mut self) -> Option<VecMut<V::Counter, T>> {
         if !self.try_make_unique() {
             return None;
         }
         Some(unsafe { self.unsafe_vec_mut() })
     }
 
-    pub fn try_into_vec(mut self) -> Result<HeaderVec<H, T>, Self> {
+    pub fn try_into_vec(mut self) -> Result<HeaderVec<V::Counter, T>, Self> {
         if !self.try_make_unique() {
             return Err(self);
         }
@@ -168,7 +105,7 @@ impl<H: Counter, V: VecType<H>, T: Clone> BaseRcVec<H, V, T> {
     }
 }
 
-impl<H: Counter, V: VecType<H>, T> Drop for BaseRcVec<H, V, T> {
+impl<V: VecType, T> Drop for BaseRcVec<V, T> {
     fn drop(&mut self) {
         unsafe {
             V::decr(self.counter());
@@ -183,7 +120,7 @@ impl<H: Counter, V: VecType<H>, T> Drop for BaseRcVec<H, V, T> {
     }
 }
 
-impl<H: Counter, V: VecType<H>, T> Clone for BaseRcVec<H, V, T> {
+impl<V: VecType, T> Clone for BaseRcVec<V, T> {
     fn clone(&self) -> Self {
         unsafe { Self::from_parts(self.parts) }
     }

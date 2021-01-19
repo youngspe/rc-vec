@@ -1,6 +1,5 @@
-use crate::base::counter::StrongWeakCounter;
 use crate::base::vec_ref::{VecMut, VecRef};
-use crate::base::{BaseRcVec, StrongType, WeakType};
+use crate::base::{BaseRcVec, VecType};
 use core::cmp::Ordering;
 use core::fmt;
 use core::ops::{Deref, DerefMut};
@@ -8,25 +7,25 @@ use core::ops::{Index, IndexMut};
 use core::slice::SliceIndex;
 use header_slice::HeaderVec;
 
-pub struct RcVec<T> {
-    base: BaseRcVec<StrongWeakCounter, StrongType, T>,
+pub struct GenericVec<V: VecType, T> {
+    pub(super) base: BaseRcVec<V, T>,
 }
 
-impl<T> RcVec<T> {
+impl<V: VecType, T> GenericVec<V, T> {
     pub fn new() -> Self {
         Self {
             base: BaseRcVec::from_vec(HeaderVec::default()),
         }
     }
 
-    pub fn downgrade(&self) -> WeakVec<T> {
-        WeakVec {
-            base: self.base.try_convert().unwrap(),
+    pub fn with_capacity(cap: usize) -> Self {
+        Self {
+            base: BaseRcVec::from_vec(HeaderVec::with_capacity(Default::default(), cap)),
         }
     }
 }
 
-impl<T: Clone> RcVec<T> {
+impl<V: VecType, T: Clone> GenericVec<V, T> {
     pub fn push(&mut self, val: T) {
         self.base.try_make_vec_mut().unwrap().push(val);
     }
@@ -55,7 +54,7 @@ impl<T: Clone> RcVec<T> {
     }
 }
 
-impl<T: Copy> RcVec<T> {
+impl<V: VecType, T: Copy> GenericVec<V, T> {
     pub fn copy_from_slice(src: &[T]) -> Self {
         Self {
             base: BaseRcVec::from_vec(HeaderVec::copy_from_slice(Default::default(), src)),
@@ -67,33 +66,33 @@ impl<T: Copy> RcVec<T> {
     }
 }
 
-impl<T> Deref for RcVec<T> {
+impl<V: VecType, T> Deref for GenericVec<V, T> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         VecRef::get_body(self.base.try_vec_ref().unwrap())
     }
 }
 
-impl<T: Clone> DerefMut for RcVec<T> {
+impl<V: VecType, T: Clone> DerefMut for GenericVec<V, T> {
     fn deref_mut(&mut self) -> &mut [T] {
         VecMut::get_body_mut(self.base.try_make_vec_mut().unwrap())
     }
 }
 
-impl<T, S: SliceIndex<[T]>> Index<S> for RcVec<T> {
+impl<V: VecType, T, S: SliceIndex<[T]>> Index<S> for GenericVec<V, T> {
     type Output = S::Output;
     fn index(&self, i: S) -> &Self::Output {
         VecRef::get_body(self.base.try_vec_ref().unwrap()).index(i)
     }
 }
 
-impl<T: Clone, S: SliceIndex<[T]>> IndexMut<S> for RcVec<T> {
+impl<V: VecType, T: Clone, S: SliceIndex<[T]>> IndexMut<S> for GenericVec<V, T> {
     fn index_mut(&mut self, i: S) -> &mut Self::Output {
         VecMut::get_body_mut(self.base.try_make_vec_mut().unwrap()).index_mut(i)
     }
 }
 
-impl<T> Clone for RcVec<T> {
+impl<V: VecType, T> Clone for GenericVec<V, T> {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
@@ -101,36 +100,16 @@ impl<T> Clone for RcVec<T> {
     }
 }
 
-impl<T> Default for RcVec<T> {
+impl<V: VecType, T> Default for GenericVec<V, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub struct WeakVec<T> {
-    base: BaseRcVec<StrongWeakCounter, WeakType, T>,
-}
-
-impl<T> WeakVec<T> {
-    pub fn upgrade(&self) -> Option<RcVec<T>> {
-        Some(RcVec {
-            base: self.base.try_convert()?,
-        })
-    }
-}
-
-impl<T> Clone for WeakVec<T> {
-    fn clone(&self) -> Self {
-        Self {
-            base: self.base.clone(),
-        }
-    }
-}
-
 #[derive(Clone)]
-pub struct IntoIter<T>(header_slice::vec::IntoValuesIter<StrongWeakCounter, T>);
+pub struct IntoIter<V: VecType, T>(header_slice::vec::IntoValuesIter<V::Counter, T>);
 
-impl<T> Iterator for IntoIter<T> {
+impl<V: VecType, T> Iterator for IntoIter<V, T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
         self.0.next()
@@ -141,21 +120,21 @@ impl<T> Iterator for IntoIter<T> {
     }
 }
 
-impl<T> ExactSizeIterator for IntoIter<T> {}
+impl<V: VecType, T> ExactSizeIterator for IntoIter<V, T> {}
 
-impl<T: Clone> IntoIterator for RcVec<T> {
+impl<V: VecType, T: Clone> IntoIterator for GenericVec<V, T> {
     type Item = T;
-    type IntoIter = IntoIter<T>;
+    type IntoIter = IntoIter<V, T>;
     fn into_iter(self) -> Self::IntoIter {
         let vec = match self.base.try_into_vec() {
             Ok(v) => v,
-            Err(_) => unreachable!("somehow this RcVec couldn't be made unique"),
+            Err(_) => unreachable!("somehow this StrongVec couldn't be made unique"),
         };
         IntoIter(vec.into_values())
     }
 }
 
-impl<'a, T> IntoIterator for &'a RcVec<T> {
+impl<'a, V: VecType, T> IntoIterator for &'a GenericVec<V, T> {
     type Item = &'a T;
     type IntoIter = core::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -163,7 +142,7 @@ impl<'a, T> IntoIterator for &'a RcVec<T> {
     }
 }
 
-impl<'a, T: Clone> IntoIterator for &'a mut RcVec<T> {
+impl<'a, V: VecType, T: Clone> IntoIterator for &'a mut GenericVec<V, T> {
     type Item = &'a mut T;
     type IntoIter = core::slice::IterMut<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -171,7 +150,7 @@ impl<'a, T: Clone> IntoIterator for &'a mut RcVec<T> {
     }
 }
 
-impl<T> core::iter::FromIterator<T> for RcVec<T> {
+impl<V: VecType, T> core::iter::FromIterator<T> for GenericVec<V, T> {
     fn from_iter<I: IntoIterator<Item = T>>(it: I) -> Self {
         Self {
             base: BaseRcVec::from_vec(it.into_iter().collect()),
@@ -179,14 +158,14 @@ impl<T> core::iter::FromIterator<T> for RcVec<T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for RcVec<T> {
+impl<V: VecType, T: fmt::Debug> fmt::Debug for GenericVec<V, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let slice: &[T] = self;
         fmt::Debug::fmt(slice, f)
     }
 }
 
-impl<T: PartialEq> PartialEq for RcVec<T> {
+impl<V: VecType, T: PartialEq> PartialEq for GenericVec<V, T> {
     fn eq(&self, rhs: &Self) -> bool {
         let s1: &[T] = self;
         let s2: &[T] = rhs;
@@ -194,9 +173,9 @@ impl<T: PartialEq> PartialEq for RcVec<T> {
     }
 }
 
-impl<T: Eq> Eq for RcVec<T> {}
+impl<V: VecType, T: Eq> Eq for GenericVec<V, T> {}
 
-impl<T: PartialOrd> PartialOrd for RcVec<T> {
+impl<V: VecType, T: PartialOrd> PartialOrd for GenericVec<V, T> {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
         let s1: &[T] = self;
         let s2: &[T] = rhs;
@@ -204,7 +183,7 @@ impl<T: PartialOrd> PartialOrd for RcVec<T> {
     }
 }
 
-impl<T: Ord> Ord for RcVec<T> {
+impl<V: VecType, T: Ord> Ord for GenericVec<V, T> {
     fn cmp(&self, rhs: &Self) -> Ordering {
         let s1: &[T] = self;
         let s2: &[T] = rhs;
